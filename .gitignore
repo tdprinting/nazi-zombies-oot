@@ -1,0 +1,6 @@
+*.z64
+*.n64
+*.v64
+*.rom
+oot_coords_out/
+__pycache__/

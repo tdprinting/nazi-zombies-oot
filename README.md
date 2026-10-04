@@ -76,3 +76,18 @@ Expect to fix a few signatures (`OnPresentFrame`, `Actor_Spawn` args, hook names
 
 ## Ideas for next steps
 Mystery box, barrier doors per scene, weapon upgrades via Pack-a-Punch-style Great Fairy, power-ups (insta-kill = Megaton Hammer), boss rounds every 5.
+
+## Getting real map coordinates from your ROM
+`tools/extract_oot_coords.py` reads your own OoT ROM (`.z64`/`.v64`/`.n64`, any version) and writes real spawn points,
+actor positions, doors, floor collision and the warp entrance index, all relative to a spawn point (the way Zombies Mode stores layouts).
+No packages needed (Pillow optional, for PNG maps). **Keep the ROM out of git**; `.gitignore` already blocks ROM files and `oot_coords_out/`.
+
+```
+python3 tools/extract_oot_coords.py oot.z64 --list                      # stats for every scene
+python3 tools/extract_oot_coords.py oot.z64 --find-entrance 0x157        # which scene/spawn an entrance goes to
+python3 tools/extract_oot_coords.py oot.z64 --scene 0x63 --render        # Lon Lon Ranch -> oot_coords_out/
+python3 tools/extract_oot_coords.py oot.z64 --scene 0x49 --setup 3 --render   # ruined market, adult night
+```
+Send back the `scene_*.json` files (and `.png`/`.svg` maps), which contain only numbers, and the layouts can be built from them.
+Scene names in `--list` are from memory, so use the room/size stats and the rendered map to confirm which scene is which.
+`python3 tools/test_extract.py` self-tests the script against a synthetic ROM.
