@@ -77,7 +77,10 @@ Expect to fix a few signatures (`OnPresentFrame`, `Actor_Spawn` args, hook names
 ## Ideas for next steps
 Mystery box, barrier doors per scene, weapon upgrades via Pack-a-Punch-style Great Fairy, power-ups (insta-kill = Megaton Hammer), boss rounds every 5.
 
-## Getting real map coordinates from your ROM
+## Getting real map coordinates from your ROM (no install)
+Open **`tools/oot-coords.html`** in any browser (double-click it), drop your ROM on it, pick a scene, and click the map to place stations, doors, spawn points and the teleporter destination. **Export > Layout file** writes the `zombies_<map>_layout.txt` the mod reads (put it in the SoH app folder, then use "Reload from file" in the Map Editor tab). Everything runs locally; the ROM is never uploaded.
+
+### Alternative: Python script
 `tools/extract_oot_coords.py` reads your own OoT ROM (`.z64`/`.v64`/`.n64`, any version) and writes real spawn points,
 actor positions, doors, floor collision and the warp entrance index, all relative to a spawn point (the way Zombies Mode stores layouts).
 No packages needed (Pillow optional, for PNG maps). **Keep the ROM out of git**; `.gitignore` already blocks ROM files and `oot_coords_out/`.

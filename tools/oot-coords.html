@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OoT Coordinate Tool</title>
+<style>
+  :root { --bg:#14161b; --panel:#1c1f26; --line:#2d323d; --text:#e6e8ec; --dim:#8b93a3; --accent:#e5484d; --ok:#46c37b; --warn:#f0b429; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; height:100vh; display:flex; flex-direction:column; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  header span { color:var(--dim); font-size:12.5px; }
+  main { flex:1; display:flex; min-height:0; }
+  aside { width:380px; max-width:45vw; border-right:1px solid var(--line); overflow:auto; padding:12px 14px; background:var(--panel); }
+  #stage { flex:1; position:relative; min-width:0; }
+  canvas { width:100%; height:100%; display:block; cursor:crosshair; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:18px 0 6px; }
+  h2:first-child { margin-top:0; }
+  button, select, input[type=text], input[type=number] { background:#262a33; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 9px; font:inherit; }
+  button { cursor:pointer; } button:hover { border-color:#4a5163; } button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:18px; text-align:center; color:var(--dim); cursor:pointer; }
+  .drop.over { border-color:var(--accent); color:var(--text); }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:5px 0; }
+  .row label { color:var(--dim); font-size:12.5px; }
+  #status { margin-top:8px; font-size:12.5px; color:var(--dim); white-space:pre-wrap; word-break:break-word; }
+  #status.err { color:var(--accent); } #status.ok { color:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:3px 5px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  tbody tr { cursor:pointer; } tbody tr:hover { background:#262a33; } tbody tr.sel { background:#3a2226; }
+  #scenelist { max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:6px; }
+  .small { font-size:12px; color:var(--dim); }
+  .hint { background:#222630; border:1px solid var(--line); border-radius:6px; padding:8px 10px; font-size:12.5px; color:var(--dim); margin:6px 0; }
+  #hud { position:absolute; left:10px; top:10px; background:rgba(20,22,27,.85); border:1px solid var(--line); border-radius:6px; padding:5px 9px; font-size:12.5px; pointer-events:none; }
+  #zones .z { display:flex; gap:4px; align-items:center; margin:3px 0; }
+  #zones input[type=text] { width:110px; } #zones input[type=number] { width:70px; }
+  .legend span { display:inline-block; margin-right:10px; font-size:12px; color:var(--dim); } .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px; }
+  @media (max-width:800px){ main{flex-direction:column;} aside{width:100%;max-width:none;max-height:50vh;border-right:0;border-bottom:1px solid var(--line);} }
+</style>
+</head>
+<body>
+<header>
+  <h1>OoT Coordinate Tool</h1>
+  <span>Runs entirely in your browser. Your ROM is never uploaded anywhere.</span>
+</header>
+<main>
+<aside>
+  <h2>1. Load your ROM</h2>
+  <label class="drop" id="drop">Drop your Ocarina of Time ROM here, or click to choose<br><span class="small">.z64 / .v64 / .n64</span>
+    <input type="file" id="file" accept=".z64,.v64,.n64,.rom,.bin" hidden></label>
+  <div id="status">Waiting for a ROM.</div>
+
+  <div id="afterRom" hidden>
+    <h2>2. Pick a scene</h2>
+    <div class="row"><input type="text" id="filter" placeholder="filter: name or 0x63" style="flex:1">
+      <button id="gotoBtn">Open</button></div>
+    <div id="scenelist"><table><thead><tr><th>#</th><th>name (hint)</th><th>rooms</th><th>spawns</th><th>floor</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="small">Names are hints from memory. Use room/size stats and the map to confirm. Lon Lon Ranch is usually 0x63.</div>
+
+    <h2>3. View</h2>
+    <div class="row"><label>Setup</label>
+      <select id="setup"><option value="0">0 child day</option><option value="1">1 child night</option><option value="2">2 adult day</option><option value="3">3 adult night</option></select>
+      <label>Origin spawn</label><select id="spawn"></select></div>
+    <div class="row legend"><label><input type="checkbox" id="lFloor" checked> floor</label>
+      <label><input type="checkbox" id="lAct" checked> actors</label>
+      <label><input type="checkbox" id="lDoor" checked> doors</label>
+      <label><input type="checkbox" id="lGrid" checked> grid</label></div>
+    <div class="legend"><span><i style="background:#ff5a5a"></i>spawns</span><span><i style="background:#f0c83c"></i>actors</span><span><i style="background:#50a0ff"></i>doors</span></div>
+    <div id="sceneInfo" class="small"></div>
+    <div class="hint">Drag to pan, scroll to zoom. The readout shows coordinates <b>relative to the origin spawn</b>, the same numbers Zombies Mode uses.</div>
+
+    <h2>4. Place pins (optional layout maker)</h2>
+    <div class="row"><label>Tool</label><select id="tool"></select></div>
+    <div class="row"><label>Zone</label><select id="zoneSel"></select></div>
+    <div class="row"><button id="undo">Undo pin</button><button id="clearPins">Clear pins</button></div>
+    <div class="small">Left-click the map to place the pin. Right-click removes the nearest pin.</div>
+    <div id="zones"></div>
+    <div class="row"><button id="addZone">+ Add zone</button></div>
+    <div class="small">Zone 0 is where you start. Door cost 0 = open, -1 = no door (e.g. teleporter-only room).
+      Define every zone the map should have; spawns you place replace the defaults for that zone.</div>
+    <div class="row"><label>Warp entrance</label><input type="number" id="entrance" style="width:90px"><span class="small" id="entList"></span></div>
+    <div class="row"><label>Teleporter</label><span class="small">pick the "Teleporter destination" tool to set it (Kino-style maps)</span></div>
+
+    <h2>5. Export</h2>
+    <div class="row">
+      <button class="primary" id="exLayout">Layout file (.txt)</button>
+      <button id="exJson">Scene data (.json)</button>
+      <button id="exPng">Map image (.png)</button></div>
+    <div class="small">The layout file goes in the SoH app folder as <b>zombies_lonlon_layout.txt</b> or <b>zombies_kino_layout.txt</b>, then use the menu's "Reload from file". Or send the .json/.png to me.</div>
+  </div>
+</aside>
+<div id="stage"><canvas id="cv"></canvas><div id="hud">Load a ROM and open a scene.</div></div>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const NAMES = {0:"Deku Tree",1:"Dodongo's Cavern",2:"Jabu-Jabu",3:"Forest Temple",4:"Fire Temple",5:"Water Temple",6:"Spirit Temple",7:"Shadow Temple",8:"Bottom of the Well",9:"Ice Cavern",
+ 0x42:"Market entrance (day)",0x43:"Market entrance (night)",0x44:"Market entrance (ruins)",0x45:"Back alley (day)",0x46:"Back alley (night)",0x47:"Market (day)",0x48:"Market (night)",0x49:"Market (ruins)",
+ 0x4A:"Temple of Time ext (day)",0x4B:"Temple of Time ext (night)",0x4C:"Temple of Time ext (ruins)",
+ 0x51:"Hyrule Field",0x52:"Kakariko Village",0x53:"Graveyard",0x54:"Zora's River",0x55:"Kokiri Forest",0x56:"Sacred Forest Meadow",0x57:"Lake Hylia",0x58:"Zora's Domain",0x59:"Zora's Fountain",
+ 0x5A:"Gerudo Valley",0x5B:"Lost Woods",0x5C:"Desert Colossus",0x5D:"Gerudo's Fortress",0x5E:"Haunted Wasteland",0x5F:"Hyrule Castle",0x60:"Death Mountain Trail",0x61:"Death Mountain Crater",
+ 0x62:"Goron City",0x63:"Lon Lon Ranch",0x64:"Outside Ganon's Castle"};
+const STATIONS = ["Mystery Box","Pack-a-Punch","Juggernog","Speed Cola","Double Tap","Quick Revive","Wall Buy: Hammer","Wall Buy: Bow","Power Switch","Teleporter"];
+
+// ------------------------------------------------------------ ROM
+function normalize(buf){
+  const n = buf.byteLength & ~3;
+  const d = new Uint8Array(buf.slice(0, n));
+  const h = (d[0]<<24|d[1]<<16|d[2]<<8|d[3])>>>0;
+  if (h === 0x80371240) return {d, fmt:"z64"};
+  if (h === 0x37804012){ for (let i=0;i<n;i+=2){ const t=d[i]; d[i]=d[i+1]; d[i+1]=t; } return {d, fmt:"v64 (byte-swapped)"}; }
+  if (h === 0x40123780){ for (let i=0;i<n;i+=4){ let t=d[i]; d[i]=d[i+3]; d[i+3]=t; t=d[i+1]; d[i+1]=d[i+2]; d[i+2]=t; } return {d, fmt:"n64 (little-endian)"}; }
+  throw new Error("This doesn't look like an N64 ROM (header "+h.toString(16)+").");
+}
+const U32 = (dv,o)=>dv.getUint32(o,false), U16=(dv,o)=>dv.getUint16(o,false), S16=(dv,o)=>dv.getInt16(o,false);
+
+function yaz0(src){
+  const dv=new DataView(src.buffer,src.byteOffset,src.byteLength);
+  if (src[0]!==0x59||src[1]!==0x61||src[2]!==0x7A||src[3]!==0x30) throw new Error("expected Yaz0 data");
+  const size=U32(dv,4), out=new Uint8Array(size);
+  let s=16,d=0; const n=src.length;
+  while (d<size && s<n){
+    let code=src[s++];
+    for (let i=0;i<8;i++){
+      if (d>=size) break;
+      if (code & 0x80){ out[d++]=src[s++]; }
+      else {
+        const b1=src[s], b2=src[s+1]; s+=2;
+        const dist=((b1&0xF)<<8)|b2; let cnt=b1>>4;
+        if (cnt===0){ cnt=src[s++]+0x12; } else cnt+=2;
+        let ref=d-(dist+1);
+        for (let k=0;k<cnt && d<size;k++) out[d++]=out[ref++];
+      }
+      code=(code<<1)&0xFF;
+    }
+  }
+  return out;
+}
+
+class Rom {
+  constructor(buf){
+    const {d,fmt}=normalize(buf); this.d=d; this.fmt=fmt;
+    this.dv=new DataView(d.buffer,d.byteOffset,d.byteLength);
+    this.title=String.fromCharCode(...d.slice(0x20,0x34)).trim();
+    this.gcode=String.fromCharCode(...d.slice(0x3B,0x3F));
+    this.version=d[0x3F];
+    this.crc=[U32(this.dv,0x10),U32(this.dv,0x14)];
+    this.readDma(); this.cache=new Map();
+  }
+  readDma(){
+    const {d,dv}=this; let off=-1;
+    const lim=Math.min(d.length,0x200000)-32;
+    for (let o=0;o<lim;o+=16){
+      if (U32(dv,o)===0 && U32(dv,o+8)===0 && U32(dv,o+12)===0){
+        const ve=U32(dv,o+4);
+        if (ve>0x400 && ve<0x10000 && U32(dv,o+16)===ve){ off=o; break; }
+      }
+    }
+    if (off<0) throw new Error("Couldn't find the file table. Is this an Ocarina of Time ROM?");
+    this.dmaOffset=off; this.entries=[]; this.byVirt=new Map();
+    for (let i=0;i<4000 && off+i*16+16<=d.length;i++){
+      const vs=U32(dv,off+i*16), ve=U32(dv,off+i*16+4), ps=U32(dv,off+i*16+8), pe=U32(dv,off+i*16+12);
+      if (vs===0 && ve===0 && i>0) break;
+      if (ve<vs) break;
+      const e={vs,ve,ps,pe}; this.entries.push(e); this.byVirt.set(vs,e);
+    }
+  }
+  file(vs){
+    if (this.cache.has(vs)) return this.cache.get(vs);
+    const e=this.byVirt.get(vs); if (!e || e.ps===0xFFFFFFFF) return null;
+    let data;
+    if (e.pe===0) data=this.d.slice(e.ps,e.ps+(e.ve-e.vs));
+    else { const comp=this.d.subarray(e.ps,e.pe); data = (comp[0]===0x59&&comp[1]===0x61)? yaz0(comp) : comp.slice(); }
+    this.cache.set(vs,data); return data;
+  }
+}
+const tick = ()=>new Promise(r=>setTimeout(r,0));
+
+async function findSceneTable(rom, say){
+  const ends=new Map(rom.entries.map(e=>[e.vs,e.ve]));
+  let best={run:0,data:null,off:0};
+  const cands=rom.entries.filter(e=>{const s=e.ve-e.vs; return s>=0x20000 && s<=0x600000;});
+  let k=0;
+  for (const e of cands){
+    say("Looking for the scene table... ("+(++k)+"/"+cands.length+")"); await tick();
+    const data=rom.file(e.vs); if (!data) continue;
+    const n=data.length>>2, dv=new DataView(data.buffer,data.byteOffset,data.byteLength);
+    const w=new Uint32Array(n); for (let i=0;i<n;i++) w[i]=dv.getUint32(i*4,false);
+    const run=new Int32Array(n+6);
+    for (let j=n-2;j>=0;j--){
+      if (w[j]!==0 && ends.get(w[j])===w[j+1]) run[j]=1+(j+5<n?run[j+5]:0);
+    }
+    let bj=0; for (let j=1;j<n;j++) if (run[j]>run[bj]) bj=j;
+    if (run[bj]>best.run) best={run:run[bj],data,off:bj*4};
+  }
+  if (best.run<60) throw new Error("Couldn't find the scene table in this ROM.");
+  return best;
+}
+
+function findEntranceTable(code){
+  const n=code.length>>2, run=new Int32Array(n+1);
+  for (let i=n-1;i>=0;i--){ const o=i*4; if (code[o]<0x70 && code[o+1]<0x40) run[i]=1+run[i+1]; }
+  let best=0,bi=-1;
+  for (let i=0;i<n;i++){
+    if (run[i]>best && run[i]>200){
+      const set=new Set(); for (let k=0;k<Math.min(run[i],400);k++) set.add(code[(i+k)*4]);
+      if (set.size>=30){ best=run[i]; bi=i; }
+    }
+  }
+  return bi<0?null:{off:bi*4,count:best};
+}
+
+// ------------------------------------------------------------ scene / room parsing
+const segOff = p => p & 0x00FFFFFF;
+function walkHeader(data,dv,off){
+  const c={}; let p=off;
+  while (p+8<=data.length){
+    const cmd=data[p], d1=data[p+1], d2=U32(dv,p+4);
+    if (cmd===0x14) break;
+    if (!(cmd in c)) c[cmd]=[d1,d2];
+    p+=8;
+  }
+  return c;
+}
+function pickHeader(data,dv,setup){
+  const main=walkHeader(data,dv,0);
+  if (setup>0 && main[0x18]){
+    const lst=segOff(main[0x18][1]);
+    if (lst+4*setup<=data.length){
+      const ptr=U32(dv,lst+4*(setup-1));
+      if (ptr && ((ptr>>>24)===2||(ptr>>>24)===3) && segOff(ptr)<data.length){
+        const alt=walkHeader(data,dv,segOff(ptr));
+        for (const k in main) if (!(k in alt)) alt[k]=main[k];
+        return alt;
+      }
+    }
+  }
+  return main;
+}
+function actorEntries(data,dv,ptr,count){
+  const out=[]; let o=segOff(ptr);
+  for (let i=0;i<count;i++,o+=16){
+    if (o+16>data.length) break;
+    out.push({id:U16(dv,o),pos:[S16(dv,o+2),S16(dv,o+4),S16(dv,o+6)],rot:[S16(dv,o+8),S16(dv,o+10),S16(dv,o+12)],params:U16(dv,o+14)});
+  }
+  return out;
+}
+function parseCollision(data,dv,o,keep){
+  if (o+0x2C>data.length) return null;
+  const mn=[S16(dv,o),S16(dv,o+2),S16(dv,o+4)], mx=[S16(dv,o+6),S16(dv,o+8),S16(dv,o+10)];
+  const nv=U16(dv,o+0x0C), vp=segOff(U32(dv,o+0x10)), np=U16(dv,o+0x14), pp=segOff(U32(dv,o+0x18));
+  const verts=[]; for (let i=0;i<nv && vp+6*i+6<=data.length;i++) verts.push([S16(dv,vp+6*i),S16(dv,vp+6*i+2),S16(dv,vp+6*i+4)]);
+  const floors=[]; let nfloor=0, walls=0;
+  for (let i=0;i<np;i++){
+    const q=pp+16*i; if (q+16>data.length) break;
+    const a=U16(dv,q+2)&0x1FFF, b=U16(dv,q+4)&0x1FFF, c=U16(dv,q+6)&0x1FFF, ny=S16(dv,q+10);
+    if (a>=verts.length||b>=verts.length||c>=verts.length) continue;
+    if (ny>0.5*32767){ nfloor++; if (keep) floors.push([verts[a],verts[b],verts[c]]); }
+    else if (Math.abs(ny)<0.3*32767) walls++;
+  }
+  return {min:mn,max:mx,vertices:nv,polys:np,floors,nfloor,walls};
+}
+function parseScene(data,setup,keep){
+  const dv=new DataView(data.buffer,data.byteOffset,data.byteLength);
+  const h=pickHeader(data,dv,setup);
+  const info={spawns:[],entranceList:[],rooms:[],transitions:[],collision:null};
+  if (h[0]){
+    info.spawns=actorEntries(data,dv,h[0][1],h[0][0]);
+    if (h[6]){ const o=segOff(h[6][1]); for (let i=0;i<h[0][0];i++) if (o+2*i+2<=data.length) info.entranceList.push({spawn:data[o+2*i],room:data[o+2*i+1]}); }
+  }
+  if (h[4]){ const o=segOff(h[4][1]); for (let i=0;i<h[4][0];i++) if (o+8*i+8<=data.length) info.rooms.push([U32(dv,o+8*i),U32(dv,o+8*i+4)]); }
+  if (h[0x0E]){
+    const o=segOff(h[0x0E][1]);
+    for (let i=0;i<h[0x0E][0];i++){
+      const q=o+16*i; if (q+16>data.length) break;
+      info.transitions.push({front_room:dv.getInt8(q),back_room:dv.getInt8(q+2),id:U16(dv,q+4),pos:[S16(dv,q+6),S16(dv,q+8),S16(dv,q+10)],rot_y:S16(dv,q+12),params:U16(dv,q+14)});
+    }
+  }
+  if (h[3]) info.collision=parseCollision(data,dv,segOff(h[3][1]),keep);
+  return info;
+}
+function parseRoom(data,setup){
+  const dv=new DataView(data.buffer,data.byteOffset,data.byteLength);
+  const h=pickHeader(data,dv,setup);
+  return h[1]?actorEntries(data,dv,h[1][1],h[1][0]):[];
+}
+
+// ------------------------------------------------------------ state
+let rom=null, scenes=[], entrances=null, S=null;
+const view={cx:0,cz:0,scale:0.1};
+const zones=[{name:"Start",cost:0,noSpawn:false}];
+let pins=[]; // {type:'spawn'|'door'|'station'|'teleport', zone, station, pos:[x,y,z] world}
+function say(msg,cls){ const s=$("status"); s.textContent=msg; s.className=cls||""; }
+const hex=(n,w=2)=>"0x"+n.toString(16).toUpperCase().padStart(w,"0");
+
+async function loadRom(file){
+  try{
+    say("Reading ROM..."); await tick();
+    rom=new Rom(await file.arrayBuffer());
+    const sha=await crypto.subtle.digest("SHA-1",rom.d).then(b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")).catch(()=>"n/a");
+    const st=await findSceneTable(rom,m=>say(m));
+    scenes=[]; for (let i=0;i<st.run;i++){ const o=st.off+20*i, dv=new DataView(st.data.buffer,st.data.byteOffset,st.data.byteLength); scenes.push([U32(dv,o),U32(dv,o+4)]); }
+    const et=findEntranceTable(st.data);
+    entrances=et?Array.from({length:et.count},(_,i)=>[st.data[et.off+4*i],st.data[et.off+4*i+1]]):null;
+    let msg=rom.title+" ["+rom.fmt+"] "+rom.gcode+" v"+rom.version+"\nCRC "+rom.crc.map(c=>c.toString(16).toUpperCase().padStart(8,"0")).join(" ")+"\nsha1 "+sha+"\n";
+    msg+=scenes.length+" scenes"+(scenes.length===110?"":" (expected 110: indices may be off)")+"\n";
+    msg+=et?(et.count+" entrances"+(et.count===1556?"":" (expected 1556: entrance numbers may be off)")):"entrance table not found (warp numbers unavailable)";
+    romInfo=msg; say(msg,"ok"); await tick();
+    await buildSceneList();
+    $("afterRom").hidden=false;
+  }catch(e){ say(String(e.message||e),"err"); console.error(e); }
+}
+
+async function buildSceneList(){
+  const rows=$("rows"); rows.innerHTML="";
+  for (let i=0;i<scenes.length;i++){
+    if (i%10===0){ say(romInfo+"\nScanning scenes "+i+"/"+scenes.length+"...","ok"); await tick(); }
+    const data=rom.file(scenes[i][0]); let inf=null;
+    try{ if (data) inf=parseScene(data,0,false); }catch(e){}
+    const tr=document.createElement("tr"); tr.dataset.i=i;
+    const c=inf&&inf.collision;
+    tr.innerHTML="<td>"+hex(i)+"</td><td>"+(NAMES[i]||"?")+"</td><td>"+(inf?inf.rooms.length:"-")+"</td><td>"+(inf?inf.spawns.length:"-")+"</td><td>"+(c?c.nfloor:"-")+"</td>";
+    tr.addEventListener("click",()=>openScene(i));
+    rows.appendChild(tr);
+  }
+  say(romInfo+"\nReady. Pick a scene.","ok");
+}
+let romInfo="";
+
+$("filter").addEventListener("input",()=>{
+  const q=$("filter").value.trim().toLowerCase();
+  for (const tr of $("rows").children){ const t=tr.textContent.toLowerCase(); tr.hidden=q&&!t.includes(q); }
+});
+$("gotoBtn").addEventListener("click",()=>{ const v=parseInt($("filter").value.trim(),0); if (!isNaN(v)&&v<scenes.length) openScene(v); });
+
+function openScene(i){
+  const setup=+$("setup").value;
+  const data=rom.file(scenes[i][0]); if (!data){ say("Scene "+hex(i)+" has no file","err"); return; }
+  const inf=parseScene(data,setup,true);
+  if (!inf.spawns.length){ say("Scene "+hex(i)+" has no spawn list at setup "+setup,"err"); return; }
+  const rooms=inf.rooms.map(([rs])=>{ const rd=rom.file(rs); return rd?parseRoom(rd,setup):[]; });
+  S={id:i,setup,inf,rooms,spawn:Math.min(+$("spawn").value||0,inf.spawns.length-1),grid:null};
+  buildGrid();
+  const sp=$("spawn"); sp.innerHTML=""; inf.spawns.forEach((s,k)=>{ const o=document.createElement("option"); o.value=k; o.textContent=k+" ("+s.pos.join(", ")+")"; sp.appendChild(o); });
+  sp.value=S.spawn;
+  for (const tr of $("rows").children) tr.classList.toggle("sel",+tr.dataset.i===i);
+  pins=[]; fitView(); updateInfo(); draw();
+  const ent=entrancesInto(i); if (ent.length) $("entrance").value=parseInt(ent[0].entrance,16);
+}
+const origin=()=>S.inf.spawns[S.spawn].pos;
+function entrancesInto(sc){ if (!entrances) return []; const o=[]; entrances.forEach(([s,sp],i)=>{ if (s===sc) o.push({entrance:hex(i,4),spawn:sp}); }); return o; }
+
+function buildGrid(){
+  const c=S.inf.collision; S.floors=c?c.floors:[]; const cell=256, g=new Map();
+  S.floors.forEach((t,idx)=>{
+    const xs=t.map(v=>v[0]), zs=t.map(v=>v[2]);
+    for (let gx=Math.floor(Math.min(...xs)/cell); gx<=Math.floor(Math.max(...xs)/cell); gx++)
+      for (let gz=Math.floor(Math.min(...zs)/cell); gz<=Math.floor(Math.max(...zs)/cell); gz++){
+        const k=gx+","+gz; (g.get(k)||g.set(k,[]).get(k)).push(idx);
+      }
+  });
+  S.grid=g; S.cell=cell;
+}
+function inTri(px,pz,a,b,c){
+  const d=(b[2]-c[2])*(a[0]-c[0])+(c[0]-b[0])*(a[2]-c[2]); if (d===0) return null;
+  const l1=((b[2]-c[2])*(px-c[0])+(c[0]-b[0])*(pz-c[2]))/d, l2=((c[2]-a[2])*(px-c[0])+(a[0]-c[0])*(pz-c[2]))/d, l3=1-l1-l2;
+  return (l1>=0&&l2>=0&&l3>=0)?[l1,l2,l3]:null;
+}
+function floorY(x,z){ // height of the floor nearest the origin's height at world x,z, or null
+  if (!S||!S.grid) return null; const oy=origin()[1]; let best=null,bd=1e9;
+  for (const idx of (S.grid.get(Math.floor(x/S.cell)+","+Math.floor(z/S.cell))||[])){
+    const t=S.floors[idx], l=inTri(x,z,t[0],t[1],t[2]); if (!l) continue;
+    const y=l[0]*t[0][1]+l[1]*t[1][1]+l[2]*t[2][1], d=Math.abs(y-oy);
+    if (d<bd){bd=d;best=y;}
+  }
+  return best;
+}
+
+function updateInfo(){
+  const c=S.inf.collision, ent=entrancesInto(S.id);
+  $("sceneInfo").innerHTML="<b>"+hex(S.id)+" "+(NAMES[S.id]||"")+"</b> setup "+S.setup+"<br>rooms "+S.inf.rooms.length+", spawns "+S.inf.spawns.length+", doors "+S.inf.transitions.length+", floor tris "+(c?c.nfloor:0)+
+    "<br>entrances into this scene: "+(ent.map(e=>e.entrance+" (spawn "+e.spawn+")").join(", ")||"none found");
+  $("entList").textContent=ent.length?"found: "+ent.map(e=>e.entrance).join(" "):"";
+}
+
+// ------------------------------------------------------------ drawing
+const cv=$("cv"), ctx=cv.getContext("2d");
+function resize(){ const r=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1; cv.width=Math.max(1,r.width*dpr); cv.height=Math.max(1,r.height*dpr); draw(); }
+window.addEventListener("resize",resize);
+function fitView(){
+  const r=cv.getBoundingClientRect(); const c=S.inf.collision; const o=origin();
+  let minx=o[0]-500,maxx=o[0]+500,minz=o[2]-500,maxz=o[2]+500;
+  if (c&&c.nfloor){ minx=c.min[0];maxx=c.max[0];minz=c.min[2];maxz=c.max[2]; }
+  view.cx=(minx+maxx)/2-o[0]; view.cz=(minz+maxz)/2-o[2];
+  view.scale=Math.min(r.width/Math.max(1,maxx-minx), r.height/Math.max(1,maxz-minz))*0.9;
+}
+const toScreen=(x,z)=>[(x-view.cx)*view.scale+cv.clientWidth/2,(z-view.cz)*view.scale+cv.clientHeight/2];
+const toWorldRel=(sx,sy)=>[(sx-cv.clientWidth/2)/view.scale+view.cx,(sy-cv.clientHeight/2)/view.scale+view.cz];
+const PIN_COL={spawn:"#ff7a3d",door:"#c77dff",station:"#46c37b",teleport:"#4dd0e1"};
+function pinLabel(p){ return p.type==="spawn"?"Z"+p.zone+" spawn":p.type==="door"?"Z"+p.zone+" door":p.type==="teleport"?"teleport dest":STATIONS[p.station]; }
+
+function draw(){
+  const dpr=window.devicePixelRatio||1; ctx.setTransform(dpr,0,0,dpr,0,0);
+  const W=cv.clientWidth,H=cv.clientHeight; ctx.fillStyle="#101216"; ctx.fillRect(0,0,W,H);
+  if (!S) return;
+  const o=origin();
+  if ($("lFloor").checked){
+    ctx.fillStyle="#3f5a44"; ctx.beginPath();
+    for (const t of S.floors){
+      let p=toScreen(t[0][0]-o[0],t[0][2]-o[2]); ctx.moveTo(p[0],p[1]);
+      p=toScreen(t[1][0]-o[0],t[1][2]-o[2]); ctx.lineTo(p[0],p[1]);
+      p=toScreen(t[2][0]-o[0],t[2][2]-o[2]); ctx.lineTo(p[0],p[1]);
+    }
+    ctx.fill();
+  }
+  if ($("lGrid").checked){
+    const step=view.scale<0.02?2000:view.scale<0.06?1000:500, tl=toWorldRel(0,0), br=toWorldRel(W,H);
+    ctx.lineWidth=1; ctx.font="11px system-ui"; ctx.fillStyle="#7d86b0";
+    for (let gx=Math.floor(tl[0]/step)*step;gx<=br[0];gx+=step){ const x=toScreen(gx,0)[0]; ctx.strokeStyle=gx===0?"#6a7399":"#262b3d"; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); ctx.fillText(gx,x+2,12); }
+    for (let gz=Math.floor(tl[1]/step)*step;gz<=br[1];gz+=step){ const y=toScreen(0,gz)[1]; ctx.strokeStyle=gz===0?"#6a7399":"#262b3d"; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillText(gz,2,y-2); }
+  }
+  if ($("lAct").checked){
+    ctx.fillStyle="#f0c83c";
+    for (const room of S.rooms) for (const a of room){ const p=toScreen(a.pos[0]-o[0],a.pos[2]-o[2]); ctx.fillRect(p[0]-2,p[1]-2,4,4); }
+  }
+  if ($("lDoor").checked){
+    ctx.strokeStyle="#50a0ff"; ctx.lineWidth=2;
+    for (const t of S.inf.transitions){ const p=toScreen(t.pos[0]-o[0],t.pos[2]-o[2]); ctx.strokeRect(p[0]-5,p[1]-5,10,10); }
+  }
+  S.inf.spawns.forEach((s,i)=>{ const p=toScreen(s.pos[0]-o[0],s.pos[2]-o[2]); ctx.strokeStyle="#ff5a5a"; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(p[0],p[1],7,0,6.3); ctx.stroke(); ctx.fillStyle="#ff9a9a"; ctx.font="12px system-ui"; ctx.fillText("spawn "+i+(i===S.spawn?" (origin)":""),p[0]+10,p[1]+4); });
+  ctx.font="12px system-ui";
+  for (const p of pins){
+    const s=toScreen(p.pos[0]-o[0],p.pos[2]-o[2]); ctx.fillStyle=PIN_COL[p.type]; ctx.strokeStyle="#000"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(s[0],s[1],6,0,6.3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle="#fff"; ctx.fillText(pinLabel(p),s[0]+9,s[1]+4);
+  }
+}
+
+// ------------------------------------------------------------ interaction
+let drag=null, hover=null;
+cv.addEventListener("mousedown",e=>{ if (e.button===0) drag={x:e.offsetX,y:e.offsetY,cx:view.cx,cz:view.cz,moved:false}; });
+window.addEventListener("mouseup",e=>{
+  if (drag && !drag.moved && e.target===cv && S) placePin(e.offsetX,e.offsetY);
+  drag=null;
+});
+cv.addEventListener("mousemove",e=>{
+  if (drag){ const dx=e.offsetX-drag.x, dy=e.offsetY-drag.y; if (Math.abs(dx)+Math.abs(dy)>4) drag.moved=true; if (drag.moved){ view.cx=drag.cx-dx/view.scale; view.cz=drag.cz-dy/view.scale; draw(); } }
+  if (!S) return;
+  const r=toWorldRel(e.offsetX,e.offsetY), o=origin(), y=floorY(r[0]+o[0],r[1]+o[2]);
+  let txt="x "+Math.round(r[0])+"   z "+Math.round(r[1])+(y===null?"":"   y "+Math.round(y-o[1]))+"   (relative to spawn "+S.spawn+")";
+  let best=null,bd=(8/view.scale)**2;
+  for (const room of S.rooms) for (const a of room){ const dx=a.pos[0]-o[0]-r[0], dz=a.pos[2]-o[2]-r[1], d=dx*dx+dz*dz; if (d<bd){bd=d;best=a;} }
+  if (best) txt+="   | actor id "+hex(best.id,4)+" params "+hex(best.params,4);
+  $("hud").textContent=txt;
+});
+cv.addEventListener("wheel",e=>{
+  e.preventDefault(); if (!S) return;
+  const before=toWorldRel(e.offsetX,e.offsetY); view.scale*=e.deltaY<0?1.2:1/1.2; view.scale=Math.max(0.005,Math.min(5,view.scale));
+  const after=toWorldRel(e.offsetX,e.offsetY); view.cx+=before[0]-after[0]; view.cz+=before[1]-after[1]; draw();
+},{passive:false});
+cv.addEventListener("contextmenu",e=>{
+  e.preventDefault(); if (!S||!pins.length) return;
+  const o=origin(); let bi=-1,bd=(14/view.scale)**2; const r=toWorldRel(e.offsetX,e.offsetY);
+  pins.forEach((p,i)=>{ const dx=p.pos[0]-o[0]-r[0], dz=p.pos[2]-o[2]-r[1], d=dx*dx+dz*dz; if (d<bd){bd=d;bi=i;} });
+  if (bi>=0){ pins.splice(bi,1); draw(); }
+});
+
+function placePin(sx,sy){
+  const t=$("tool").value, r=toWorldRel(sx,sy), o=origin(), wx=Math.round(r[0]+o[0]), wz=Math.round(r[1]+o[2]);
+  let wy=floorY(wx,wz); if (wy===null) wy=o[1]; wy=Math.round(wy);
+  const zone=+$("zoneSel").value||0;
+  if (t==="spawn"||t==="door"||t==="teleport"){
+    if (t!=="spawn") pins=pins.filter(p=>!(p.type===t&&(t==="teleport"||p.zone===zone))); // one door per zone, one teleport dest
+    pins.push({type:t,zone,pos:[wx,wy,wz]});
+  } else if (t.startsWith("st")){
+    const st=+t.slice(2); pins=pins.filter(p=>!(p.type==="station"&&p.station===st));
+    pins.push({type:"station",station:st,zone,pos:[wx,wy,wz]});
+  }
+  draw();
+}
+
+function refreshTools(){
+  const tool=$("tool"), prev=tool.value; tool.innerHTML="";
+  const add=(v,t)=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; tool.appendChild(o); };
+  add("spawn","Zombie spawn point (selected zone)"); add("door","Door (selected zone)"); add("teleport","Teleporter destination");
+  STATIONS.forEach((n,i)=>add("st"+i,"Station: "+n+" (selected zone)"));
+  if ([...tool.options].some(o=>o.value===prev)) tool.value=prev;
+  const zs=$("zoneSel"), pz=zs.value; zs.innerHTML="";
+  zones.forEach((z,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=i+": "+z.name; zs.appendChild(o); });
+  zs.value=Math.min(+pz||0,zones.length-1);
+  const zd=$("zones"); zd.innerHTML="";
+  zones.forEach((z,i)=>{
+    const d=document.createElement("div"); d.className="z";
+    d.innerHTML="<span class='small'>"+i+"</span>";
+    const n=document.createElement("input"); n.type="text"; n.value=z.name; n.addEventListener("change",()=>{z.name=n.value.replace(/[\r\n]/g," ")||("Zone "+i); refreshTools();});
+    const c=document.createElement("input"); c.type="number"; c.value=z.cost; c.title="door cost"; c.addEventListener("change",()=>{z.cost=parseInt(c.value)||0;});
+    const ns=document.createElement("label"); ns.className="small"; const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=z.noSpawn; cb.addEventListener("change",()=>{z.noSpawn=cb.checked;}); ns.append(cb," no spawns");
+    d.append(n,c,ns);
+    if (i>0){ const x=document.createElement("button"); x.textContent="×"; x.addEventListener("click",()=>{ zones.splice(i,1); pins=pins.filter(p=>p.zone!==i).map(p=>(p.zone>i?Object.assign(p,{zone:p.zone-1}):p)); refreshTools(); draw(); }); d.append(x); }
+    zd.appendChild(d);
+  });
+}
+$("addZone").addEventListener("click",()=>{ zones.push({name:"Zone "+zones.length,cost:1000,noSpawn:false}); refreshTools(); $("zoneSel").value=zones.length-1; });
+$("undo").addEventListener("click",()=>{ pins.pop(); draw(); });
+$("clearPins").addEventListener("click",()=>{ pins=[]; draw(); });
+["lFloor","lAct","lDoor","lGrid"].forEach(id=>$(id).addEventListener("change",draw));
+$("setup").addEventListener("change",()=>{ if (S) openScene(S.id); });
+$("spawn").addEventListener("change",()=>{ if (S){ S.spawn=+$("spawn").value; fitView(); draw(); } });
+
+// ------------------------------------------------------------ export
+function download(name,blobOrText,type){ const b=blobOrText instanceof Blob?blobOrText:new Blob([blobOrText],{type:type||"text/plain"}); const a=document.createElement("a"); a.href=URL.createObjectURL(b); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500); }
+const rel3=(p,o)=>[p[0]-o[0],p[1]-o[1],p[2]-o[2]];
+function layoutText(){
+  const o=origin(), L=[]; L.push("scene "+S.id); L.push("entrance "+(parseInt($("entrance").value)||0));
+  const tp=pins.find(p=>p.type==="teleport"); if (tp){ const r=rel3(tp.pos,o); L.push("teleport "+r.join(" ")); }
+  zones.forEach((z,i)=>{ L.push("zone "+i+" "+z.cost+" "+(z.noSpawn?1:0)+" "+z.name); });
+  zones.forEach((z,i)=>{
+    const d=pins.find(p=>p.type==="door"&&p.zone===i); if (d) L.push("door "+i+" "+rel3(d.pos,o).join(" "));
+    pins.filter(p=>p.type==="spawn"&&p.zone===i).forEach(p=>L.push("spawn "+i+" "+rel3(p.pos,o).join(" ")));
+  });
+  pins.filter(p=>p.type==="station").sort((a,b)=>a.station-b.station).forEach(p=>L.push("station "+p.station+" "+p.zone+" "+rel3(p.pos,o).join(" ")));
+  return L.join("\n")+"\n";
+}
+function gridRows(cell){
+  const o=origin(), cells=new Set(); if (!S.floors.length) return null;
+  for (const t of S.floors){
+    const xs=t.map(v=>v[0]), zs=t.map(v=>v[2]);
+    for (let gx=Math.floor((Math.min(...xs)-o[0])/cell);gx<=Math.floor((Math.max(...xs)-o[0])/cell);gx++)
+      for (let gz=Math.floor((Math.min(...zs)-o[2])/cell);gz<=Math.floor((Math.max(...zs)-o[2])/cell);gz++)
+        if (inTri(o[0]+gx*cell+cell/2,o[2]+gz*cell+cell/2,t[0],t[1],t[2])) cells.add(gx+","+gz);
+  }
+  if (!cells.size) return null;
+  const pts=[...cells].map(s=>s.split(",").map(Number)); const x0=Math.min(...pts.map(p=>p[0])),x1=Math.max(...pts.map(p=>p[0])),z0=Math.min(...pts.map(p=>p[1])),z1=Math.max(...pts.map(p=>p[1]));
+  const rows=[]; for (let z=z0;z<=z1;z++){ let r=""; for (let x=x0;x<=x1;x++) r+=cells.has(x+","+z)?"#":"."; rows.push(r); }
+  return {cell,origin_cell_x:x0,origin_cell_z:z0,note:"column i is x=(origin_cell_x+i)*cell, row j is z=(origin_cell_z+j)*cell, relative to the chosen spawn",rows};
+}
+function sceneJson(){
+  const o=origin(), c=S.inf.collision;
+  return JSON.stringify({scene:S.id,name_hint:NAMES[S.id]||"",setup:S.setup,origin_spawn:S.spawn,origin_world:o,
+    note:"all 'rel' values are relative to origin_world (the chosen spawn); x,z are the map plane, y is height",
+    entrances_into_scene:entrancesInto(S.id),
+    spawns:S.inf.spawns.map(s=>Object.assign({},s,{rel:rel3(s.pos,o)})),entrance_list:S.inf.entranceList,
+    transitions:S.inf.transitions.map(t=>Object.assign({},t,{rel:rel3(t.pos,o)})),
+    rooms:S.rooms.map((acts,i)=>({room:i,actors:acts.map(a=>Object.assign({},a,{rel:rel3(a.pos,o)}))})),
+    collision:c?{min:c.min,max:c.max,floor_tris:c.nfloor,wall_polys:c.walls,polys:c.polys}:null,
+    walkable_grid:gridRows(100)},null,1);
+}
+$("exLayout").addEventListener("click",()=>S&&download("zombies_layout.txt",layoutText()));
+$("exJson").addEventListener("click",()=>S&&download("scene_"+hex(S.id).slice(2)+"_setup"+S.setup+".json",sceneJson(),"application/json"));
+$("exPng").addEventListener("click",()=>S&&cv.toBlob(b=>download("scene_"+hex(S.id).slice(2)+".png",b)));
+
+// ------------------------------------------------------------ file input
+const drop=$("drop"), fi=$("file");
+fi.addEventListener("change",()=>{ if (fi.files[0]) loadRom(fi.files[0]); });
+["dragenter","dragover"].forEach(ev=>document.body.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(ev=>document.body.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.remove("over"); }));
+document.body.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if (f) loadRom(f); });
+refreshTools(); resize();
+window.OOTC={openScene,layoutText,sceneJson,get pins(){return pins;},get state(){return S;},placePinAt:(sx,sy)=>placePin(sx,sy)}; // for the self-test
+</script>
+</body>
+</html>
