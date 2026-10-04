@@ -21,6 +21,8 @@ char sMsg[96] = "";
 // Wrap a widget: remember that something changed so we can autosave once the user lets go.
 template <typename T> void Touch(T changed) { if (changed) sDirty = true; }
 
+int c_idx() { return std::clamp(gZombiesCfg.mapMode - 1, 0, ZombiesMap_Count() - 1); }
+
 void Msg(const char* m) { snprintf(sMsg, sizeof(sMsg), "%s", m); }
 
 void TabPlay() {
@@ -33,11 +35,23 @@ void TabPlay() {
 
     Touch(ImGui::Checkbox("Zombies Mode enabled", &c.enabled));
 
-    const char* maps[] = { "Any scene (free play)", "Lon Lon Ranch" };
-    Touch(ImGui::Combo("Map", &c.mapMode, maps, 2));
+    {
+        const char* cur = c.mapMode == 0 ? "Any scene (free play)" : ZombiesMap_Get(std::clamp(c.mapMode - 1, 0, ZombiesMap_Count() - 1)).name.c_str();
+        if (ImGui::BeginCombo("Map", cur)) {
+            if (ImGui::Selectable("Any scene (free play)", c.mapMode == 0)) { c.mapMode = 0; sDirty = true; }
+            for (int i = 0; i < ZombiesMap_Count(); i++)
+                if (ImGui::Selectable(ZombiesMap_Get(i).name.c_str(), c.mapMode == i + 1)) { c.mapMode = i + 1; sDirty = true; }
+            ImGui::EndCombo();
+        }
+        if (MapDef* am = ZombiesMap_Active()) ImGui::TextDisabled("%s", am->description.c_str());
+    }
     Touch(ImGui::Checkbox("Force night time", &c.forceNight));
 
     ImGui::Spacing();
+    if (!st.mapSceneSet)
+        ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "This map has no scene number set (Map Editor tab).");
+    else if (!st.canWarp && !st.sceneMatches)
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "No warp entrance set: walk into the map yourself (or set the entrance in the Map Editor).");
     if (!st.inGame) {
         ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "Load a save file first, then press Start.");
         ImGui::BeginDisabled();
@@ -178,15 +192,39 @@ void TabHud() {
 }
 
 void TabMapEditor() {
-    MapDef& m = ZombiesMap_LonLon();
+    MapDef* mp = ZombiesMap_Active();
+    if (mp == nullptr) {
+        ImGui::TextDisabled("Pick a map on the Play tab to edit its layout.");
+        return;
+    }
+    MapDef& m = *mp;
     Vec3f rel;
     bool have = ZombiesMode_GetPlayerRel(&rel);
 
-    ImGui::TextWrapped("Walk Link to a spot in the ranch, then record it here. Positions are saved relative "
+    ImGui::Text("Editing: %s", m.name.c_str());
+    ImGui::TextWrapped("Walk Link to a spot in the map, then record it here. Positions are saved relative "
                        "to where you entered the scene (from Hyrule Field), so always enter the same way. "
-                       "The default layout is a rough placeholder.");
+                       "The default layouts are rough placeholders.");
     if (have) ImGui::Text("Link (relative): %.0f, %.0f, %.0f", rel.x, rel.y, rel.z);
     else ImGui::TextDisabled("Enter the map to record positions.");
+
+    ImGui::SeparatorText("Scene");
+    ImGui::InputInt("Scene number", &m.scene);
+    ImGui::InputInt("Warp entrance index (0 = no warp)", &m.entrance);
+    {
+        int cur = ZombiesMode_CurrentScene();
+        if (cur < 0) ImGui::BeginDisabled();
+        if (ImGui::Button("Use current scene as this map's scene")) { m.scene = cur; Msg("Scene set (Save layout to keep it)"); }
+        if (cur < 0) ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("(now in scene %d)", cur);
+    }
+    if (m.hasPower) {
+        ImGui::Text("Teleporter destination: %.0f, %.0f, %.0f", m.teleportDest.x, m.teleportDest.y, m.teleportDest.z);
+        if (!have) ImGui::BeginDisabled();
+        if (ImGui::Button("Set teleporter destination here")) { m.teleportDest = rel; Msg("Teleporter destination moved"); }
+        if (!have) ImGui::EndDisabled();
+    }
 
     if (m.zones.empty()) return;
     sSelZone = std::clamp(sSelZone, 0, (int)m.zones.size() - 1);
@@ -204,7 +242,8 @@ void TabMapEditor() {
     char nameBuf[48];
     snprintf(nameBuf, sizeof(nameBuf), "%s", z.name.c_str());
     if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf))) z.name = nameBuf;
-    ImGui::DragInt("Door cost (0 = open)", &z.doorCost, 10.0f, 0, 20000);
+    ImGui::DragInt("Door cost (0 = open, -1 = no door)", &z.doorCost, 10.0f, -1, 20000);
+    ImGui::Checkbox("No zombie spawns in this zone", &z.noSpawn);
     ImGui::Text("Door at %.0f, %.0f, %.0f   |   %d spawn point(s)", z.door.x, z.door.y, z.door.z, (int)z.spawns.size());
 
     if (!have) ImGui::BeginDisabled();
@@ -215,7 +254,7 @@ void TabMapEditor() {
     ImGui::SameLine();
     if (ImGui::Button("Clear spawns")) { z.spawns.clear(); Msg("Spawns cleared (free-play ring is used if all empty)"); }
     if (ImGui::Button("Add zone")) {
-        m.zones.push_back(MapZone{ "New Zone", 1000, Vec3f{}, {} });
+        m.zones.push_back(MapZone{ "New Zone", 1000, false, Vec3f{}, {} });
         sSelZone = (int)m.zones.size() - 1;
     }
 
@@ -231,14 +270,14 @@ void TabMapEditor() {
     ImGui::TextDisabled("Station markers update the next time you enter the map.");
 
     ImGui::SeparatorText("Layout file");
-    if (ImGui::Button("Save layout")) Msg(ZombiesMap_SaveCustom(m) ? "Saved zombies_lonlon_layout.txt" : "Save FAILED");
+    if (ImGui::Button("Save layout")) Msg(ZombiesMap_SaveCustom(m) ? "Saved layout file" : "Save FAILED");
     ImGui::SameLine();
     if (ImGui::Button("Reload from file")) {
-        ZombiesMap_ResetToDefault(m);
-        Msg(ZombiesMap_LoadCustom(m) ? "Loaded saved layout" : "No saved layout; defaults restored");
+        ZombiesMap_ResetToDefault(c_idx());
+        Msg(ZombiesMap_LoadCustom(ZombiesMap_Get(c_idx())) ? "Loaded saved layout" : "No saved layout; defaults restored");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Restore defaults")) { ZombiesMap_ResetToDefault(m); Msg("Defaults restored (not saved)"); }
+    if (ImGui::Button("Restore defaults")) { ZombiesMap_ResetToDefault(c_idx()); Msg("Defaults restored (not saved)"); }
     if (sMsg[0]) ImGui::TextColored(ImVec4(0.5f, 1, 0.6f, 1), "%s", sMsg);
 }
 

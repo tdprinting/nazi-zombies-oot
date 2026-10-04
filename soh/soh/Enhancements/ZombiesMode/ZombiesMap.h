@@ -15,26 +15,32 @@ extern "C" {
 
 struct MapZone {
     std::string name;
-    int doorCost = 0;           // 0 = open from the start
+    int doorCost = 0;           // 0 = open from the start, <0 = no door (opened some other way, e.g. teleporter)
+    bool noSpawn = false;       // zombies never spawn here (e.g. the Pack-a-Punch room)
     Vec3f door{};               // stand here and use to unlock
     std::vector<Vec3f> spawns;  // zombie spawn points
 };
 
 struct MapDef {
     std::string name;
-    s16 scene = 0;
-    s16 entrance = 0;           // entrance index used by the menu's "Start" warp
+    std::string slug;           // file name part: zombies_<slug>_layout.txt
+    std::string description;
+    int scene = -1;             // OoT scene number, -1 = not set (map inactive until set)
+    int entrance = 0;           // entrance index used by the menu's "Start" warp, 0 = not set (no warp)
+    bool hasPower = false;      // Kino-style: perks/Pack-a-Punch need the power switch, teleporter exists
+    Vec3f teleportDest{};       // where the teleporter sends Link (relative)
     std::vector<MapZone> zones;
     Vec3f station[ST_COUNT]{};
     int stationZone[ST_COUNT]{};
 };
 
-// The built-in "Lon Lon Ranch" map (with any saved custom layout applied on top).
-MapDef& ZombiesMap_LonLon();
+// Registry: 0 = Lon Lon Ranch, 1 = Kino der Toten (Ruined Market).
+int ZombiesMap_Count();
+MapDef& ZombiesMap_Get(int index);
 // Map used by the current settings, or nullptr in "any scene" free-play mode.
 MapDef* ZombiesMap_Active();
 
-// Custom layout file (text, one record per line). Lives in the SoH app directory.
+// Custom layout file per map (text, one record per line). Lives in the SoH app directory.
 bool ZombiesMap_SaveCustom(const MapDef& m);
 bool ZombiesMap_LoadCustom(MapDef& m);
-void ZombiesMap_ResetToDefault(MapDef& m);
+void ZombiesMap_ResetToDefault(int index);

@@ -12,6 +12,8 @@ struct ZombiesStatus {
     bool active = false;       // mode is on AND we are in a valid scene
     bool inGame = false;       // a save file is loaded (gPlayState exists)
     bool sceneMatches = false; // currently inside the selected map's scene
+    bool mapSceneSet = true;   // selected map has a scene number
+    bool canWarp = true;       // selected map has a scene AND an entrance, so Start can warp
     int round = 0, points = 0, alive = 0, toSpawn = 0;
 };
 
@@ -19,3 +21,4 @@ ZombiesStatus ZombiesMode_GetStatus();
 bool ZombiesMode_GetPlayerRel(Vec3f* rel); // Link's position relative to the map anchor
 void ZombiesMode_StartMatch();             // enables the mode and warps to the map if needed
 void ZombiesMode_RestartMatch();
+int ZombiesMode_CurrentScene();        // scene number Link is in, or -1 on the title screen

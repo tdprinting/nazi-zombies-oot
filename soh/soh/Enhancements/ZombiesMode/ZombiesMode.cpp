@@ -93,6 +93,9 @@ struct State {
 
     bool anchorSet = false;
     bool nightSet = false;
+    bool power = false;
+    int teleportBack = 0;   // frames until Link is sent back from the teleporter
+    Vec3f teleportReturn{};
     Vec3f anchor{};
     std::vector<bool> unlocked; // per zone of the active map
     Vec3f stationPos[ST_COUNT]{};
@@ -186,7 +189,7 @@ bool PickSpawn(Player* player, Vec3f* out) {
     std::vector<Vec3f> cands;
     if (m != nullptr) {
         for (size_t z = 0; z < m->zones.size() && z < S.unlocked.size(); z++)
-            if (S.unlocked[z])
+            if (S.unlocked[z] && !m->zones[z].noSpawn)
                 for (const Vec3f& s : m->zones[z].spawns) cands.push_back(Abs(s));
     }
     if (cands.empty()) { // free play (or empty zone): ring around Link
@@ -353,7 +356,7 @@ void SetupMap(Player* player) {
     MapDef* m = ZombiesMap_Active();
     if (m != nullptr) {
         S.unlocked.assign(m->zones.size(), false);
-        for (size_t i = 0; i < m->zones.size(); i++) S.unlocked[i] = m->zones[i].doorCost <= 0;
+        for (size_t i = 0; i < m->zones.size(); i++) S.unlocked[i] = m->zones[i].doorCost == 0;
         for (int i = 0; i < ST_COUNT; i++) {
             S.stationPos[i] = Abs(m->station[i]);
             S.stationZone[i] = m->stationZone[i];
@@ -369,7 +372,7 @@ void SetupMap(Player* player) {
         }
     }
     for (int i = 0; i < ST_COUNT; i++) {
-        if (!C().stationOn[i]) continue;
+        if (!StationAvailable(i)) continue;
         if (i == ST_BOX) SpawnMarker(ACTOR_EN_BOX, 0x0000, S.stationPos[i]);
         else if (i == ST_PAP) SpawnMarker(ACTOR_EN_ELF, 0x0004, S.stationPos[i]); // Great-Fairy-ish
         else SpawnMarker(ACTOR_EN_ELF, 0x0000, S.stationPos[i]);
@@ -379,9 +382,26 @@ void SetupMap(Player* player) {
 
 bool ZoneOpen(int z) { return z < 0 || z >= (int)S.unlocked.size() || S.unlocked[z]; }
 
+// Power switch / teleporter only exist on maps with hasPower (Kino).
+bool StationAvailable(int i) {
+    if (!C().stationOn[i]) return false;
+    if (i == ST_POWER || i == ST_TELEPORT) {
+        MapDef* m = ZombiesMap_Active();
+        return m != nullptr && m->hasPower;
+    }
+    return true;
+}
+
+bool NeedsPower(int st) { return st == ST_PAP || (st >= ST_JUGG && st <= ST_REVIVE); }
+
+bool PowerRequired() {
+    MapDef* m = ZombiesMap_Active();
+    return m != nullptr && m->hasPower && !S.power;
+}
+
 int NearStation(Player* player) {
     for (int i = 0; i < ST_COUNT; i++)
-        if (C().stationOn[i] && ZoneOpen(S.stationZone[i]) &&
+        if (StationAvailable(i) && ZoneOpen(S.stationZone[i]) &&
             Math_Vec3f_DistXZ(&player->actor.world.pos, &S.stationPos[i]) <= kUseRange)
             return i;
     return -1;
@@ -391,7 +411,7 @@ int NearDoor(Player* player) {
     MapDef* m = ZombiesMap_Active();
     if (m == nullptr) return -1;
     for (size_t z = 0; z < m->zones.size() && z < S.unlocked.size(); z++) {
-        if (S.unlocked[z]) continue;
+        if (S.unlocked[z] || m->zones[z].doorCost < 0) continue; // negative = no door
         Vec3f d = Abs(m->zones[z].door);
         if (Math_Vec3f_DistXZ(&player->actor.world.pos, &d) <= kUseRange) return (int)z;
     }
@@ -430,8 +450,15 @@ void UseDoor(int zone) {
     Play(NA_SE_SY_GET_ITEM);
 }
 
+void Teleport(Player* player, const Vec3f& dest) {
+    player->actor.world.pos = dest;
+    player->actor.prevPos = dest;
+    player->actor.speedXZ = 0.0f;
+}
+
 void UseStation(int st) {
     int cost = C().stationCost[st];
+    if (NeedsPower(st) && PowerRequired()) { Toast("The power is off. Find the power switch!"); Play(NA_SE_SY_ERROR); return; }
     if (S.points < cost) { Toast("Not enough points"); Play(NA_SE_SY_ERROR); return; }
     switch (st) {
         case ST_BOX: {
@@ -470,6 +497,24 @@ void UseStation(int st) {
         }
         case ST_WALL_HAMMER: GiveToHand(W_HAMMER); Toast("Bought Megaton Hammer"); break;
         case ST_WALL_BOW: GiveToHand(W_BOW); Toast("Bought Fairy Bow"); break;
+        case ST_POWER:
+            if (S.power) { Toast("Power is already on"); return; }
+            S.power = true;
+            Banner("POWER ON");
+            break;
+        case ST_TELEPORT: {
+            MapDef* m = ZombiesMap_Active();
+            if (m == nullptr || S.teleportBack > 0) return;
+            if (!S.power) { Toast("The teleporter needs power"); return; }
+            Player* player = GET_PLAYER(gPlayState);
+            S.teleportReturn = player->actor.world.pos;
+            S.teleportBack = 30 * kFps;
+            for (size_t z = 0; z < m->zones.size() && z < S.unlocked.size(); z++)
+                if (m->zones[z].doorCost < 0) S.unlocked[z] = true; // teleporter-only zones open up
+            Teleport(player, Abs(m->teleportDest));
+            Banner("TELEPORTING...");
+            break;
+        }
     }
     S.points -= cost;
     Play(NA_SE_SY_GET_ITEM);
@@ -508,6 +553,12 @@ void OnFrame() {
         if (w.reload > 0) w.reload--;
 
     ScanZombies();
+
+    if (S.teleportBack > 0 && --S.teleportBack == 0) {
+        Teleport(player, S.teleportReturn);
+        Banner("BACK TO THE THEATER");
+        Play(NA_SE_SY_CORRECT_CHIME);
+    }
 
     Input* in = &gPlayState->state.input[0];
     if (in->cur.button & kButtonMasks[std::clamp(C().keyFire, 0, kButtonCount - 1)]) Fire(player);
@@ -593,6 +644,17 @@ void DrawHud() {
         dl->AddText(f, 20.0f * k, ImVec2(px, py), Col(C().colPoints), b);
     }
 
+    {
+        MapDef* hm = ZombiesMap_Active();
+        if (hm != nullptr && hm->hasPower)
+            dl->AddText(f, 22.0f * k, ImVec2(24.0f, 20.0f), S.power ? IM_COL32(120, 255, 140, 230) : IM_COL32(255, 120, 90, 230),
+                        S.power ? "POWER: ON" : "POWER: OFF");
+        if (S.teleportBack > 0) {
+            snprintf(b, sizeof(b), "Teleporter: back in %ds", S.teleportBack / kFps + 1);
+            dl->AddText(f, 22.0f * k, ImVec2(24.0f, 46.0f * k), IM_COL32(160, 200, 255, 230), b);
+        }
+    }
+
     if (S.toSpawn == 0 && S.zombies.empty() && S.intermission < Inter()) {
         snprintf(b, sizeof(b), "Next round in %d", S.intermission / kFps + 1);
         dl->AddText(f, 36.0f * k, ImVec2(sz.x / 2 - 130.0f * k, 60.0f), Col(C().colText, 1.1f), b);
@@ -608,8 +670,10 @@ void DrawHud() {
     Player* player = GET_PLAYER(gPlayState);
     int st = NearStation(player);
     if (st >= 0) {
-        snprintf(b, sizeof(b), "%s: %s [%d]", kButtonNames[std::clamp(C().keyUse, 0, kButtonCount - 1)],
-                 kStationNames[st], C().stationCost[st]);
+        const char* key = kButtonNames[std::clamp(C().keyUse, 0, kButtonCount - 1)];
+        if (NeedsPower(st) && PowerRequired()) snprintf(b, sizeof(b), "%s (needs power)", kStationNames[st]);
+        else if (C().stationCost[st] > 0) snprintf(b, sizeof(b), "%s: %s [%d]", key, kStationNames[st], C().stationCost[st]);
+        else snprintf(b, sizeof(b), "%s: %s", key, kStationNames[st]);
         dl->AddText(f, 26.0f * k, ImVec2(sz.x / 2 - 220.0f * k, sz.y * 0.75f), Col(C().colText, 1.1f), b);
         return;
     }
@@ -638,8 +702,10 @@ ZombiesStatus ZombiesMode_GetStatus() {
     s.alive = (int)S.zombies.size();
     s.toSpawn = S.toSpawn;
     s.inGame = gPlayState != nullptr;
-    s.sceneMatches = ZombiesMap_Active() != nullptr && gPlayState != nullptr &&
-                     gPlayState->sceneNum == ZombiesMap_Active()->scene;
+    MapDef* m = ZombiesMap_Active();
+    s.sceneMatches = m != nullptr && gPlayState != nullptr && gPlayState->sceneNum == m->scene;
+    s.mapSceneSet = m == nullptr || m->scene >= 0;
+    s.canWarp = m == nullptr || (m->scene >= 0 && m->entrance > 0);
     return s;
 }
 
@@ -655,6 +721,7 @@ void ZombiesMode_StartMatch() {
     ZombiesConfig_Save();
     MapDef* m = ZombiesMap_Active();
     if (m != nullptr && gPlayState != nullptr && gPlayState->sceneNum != m->scene) {
+        if (m->entrance <= 0) return; // no warp known: the player has to walk there
         // Warp to the map; the scene-init hook resets the match on arrival.
         gPlayState->nextEntranceIndex = m->entrance;
         gPlayState->transitionTrigger = TRANS_TRIGGER_START;
@@ -665,6 +732,8 @@ void ZombiesMode_StartMatch() {
 }
 
 void ZombiesMode_RestartMatch() { Reset(); }
+
+int ZombiesMode_CurrentScene() { return gPlayState != nullptr ? (int)gPlayState->sceneNum : -1; }
 
 void ZombiesMode_Register() {
     ZombiesConfig_Load();

@@ -39,7 +39,23 @@ Press **Start** in the menu (with a save loaded) to warp to the ranch. It starts
 
 Zombies only spawn in zones you've unlocked. Stand at a door and press the use button to buy it.
 
-**The coordinates are placeholders.** I can't see the real ranch geometry, so use the Map Editor tab to put doors, spawns and stations where they belong, then hit Save layout (written to `zombies_lonlon_layout.txt` in the SoH app directory). Doors don't physically block Link; they only gate spawns and stations.
+## Map: Kino der Toten (Ruined Market)
+Hyrule's ruined Castle Town stands in for the bombed-out theater, with the original's flow:
+
+| Zone | Door cost | Stations |
+|---|---|---|
+| Lobby | open | Hammer and Bow wall buys |
+| Foyer | 750 | Mystery Box, Juggernog |
+| Theater | 1250 | Double Tap, **Teleporter** |
+| Stage | 1500 | Speed Cola, **Power Switch** |
+| Alley | 1000 | Quick Revive |
+| Projection Room | no door | **Pack-a-Punch** (zombies never spawn here) |
+
+- **Power:** perks and Pack-a-Punch are dead until you flip the power switch (HUD shows POWER: ON/OFF).
+- **Teleporter:** needs power. It sends you to the Projection Room (and opens it) for 30 seconds, then pulls you back to the theater. Buy Pack-a-Punch in that window.
+- The scene is the Market Ruins scene (`SCENE_MARKET_RUINS`). I don't know its entrance index, so **Start** can't warp there: enter the ruined market yourself (e.g. via the Temple of Time as adult), then press Start. You can also set a warp entrance in the Map Editor.
+- As with Lon Lon, the coordinates are placeholders. Calibrate in the Map Editor tab, which also has scene number, warp entrance, teleporter destination and per-zone "no spawns" / "no door" options. Layouts save to `zombies_<map>_layout.txt`.
+- Not copied from Kino: rotating box locations, windows to barricade, Nova crawlers, the monkey bomb.
 
 Controls default to R = fire, D-Left = swap, D-Right = buy/use. Dying resets to round 1.
 
